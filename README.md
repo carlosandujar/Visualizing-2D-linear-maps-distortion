@@ -13,6 +13,10 @@ The app can support demonstrations and exercises in linear algebra and computer 
 3. Drag either of the two circular vertex handles in **Original** or **Transformed** to update the matrix. The square vertex in each triangle is fixed at the origin.
 4. The chips below the matrix indicate properties such as **Isometric**, **Angle-preserving**, **Area-preserving**, **Flip**, and **Singular**. The app also shows the singular values of the matrix, which indicate how much the map stretches or compresses in two orthogonal directions (i.e., the length of the semi-axes of the ellipse that is the image of the unit circle).
 
+[![Open the live demo. The GIF shows how to select a preset, edit the matrix, and drag vertices.](demo.gif)](https://carlosandujar.github.io/Visualizing-2D-linear-maps-distortion/)
+
+[See the live demo!](https://carlosandujar.github.io/Visualizing-2D-linear-maps-distortion/)
+
 ## Implementation details
 
 The app is a single HTML file with embedded CSS and vanilla JavaScript. The Canvas 2D API is used to draw the shapes and vectors, and Pointer Events handle vertex dragging. 
