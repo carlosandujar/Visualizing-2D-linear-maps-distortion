@@ -1,0 +1,1220 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Visualizing 2D Linear Maps distortion</title>
+  <style>
+    :root {
+      font-family: Inter, Geist, system-ui, sans-serif;
+      color: #edf3f8;
+      background: #0d131e;
+      color-scheme: dark;
+      --muted: #b9c9db;
+      --border: #34455a;
+      --surface: #141e2c;
+      --ink-blue: #8edbfa;
+      --major-axis: #f5f8ff;
+      --minor-axis: #ffdf8f;
+      --mono: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 260px; }
+
+    main {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 12px;
+      height: max(620px, 100dvh);
+      padding: 12px clamp(8px, 0.85vw, 16px) 8px;
+    }
+
+    .page-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 4px 16px;
+      padding: 0 2px 9px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h1, h2, figure { margin: 0; }
+
+    h1 {
+      font-size: clamp(1.35rem, 2.6vw, 2.75rem);
+      font-weight: 650;
+      letter-spacing: -0.04em;
+      line-height: 1.1;
+    }
+
+    .credit {
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(0.85rem, 1.3vw, 1.35rem);
+      font-weight: 550;
+    }
+
+    .comparison {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) clamp(126px, 12vw, 216px) minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-areas:
+        "original    .       transformed"
+        "circle      matrix  ellipse"
+        "source      matrix  mapped";
+      gap: 8px clamp(8px, 1vw, 18px);
+    }
+
+    .original-heading { grid-area: original; }
+    .transformed-heading { grid-area: transformed; }
+    .circle { grid-area: circle; }
+    .ellipse { grid-area: ellipse; }
+    .source-triangle { grid-area: source; }
+    .mapped-triangle { grid-area: mapped; }
+
+    .panel-heading {
+      padding-inline: 2px;
+      font-size: clamp(0.95rem, 2vw, 1.65rem);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    .plot {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+      min-width: 0;
+      min-height: 0;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      background: var(--surface);
+    }
+
+    figcaption {
+      padding: 5px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: clamp(0.75rem, 1.05vw, 1.15rem);
+      font-weight: 600;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      background: #111a27;
+    }
+
+    .source-triangle canvas, .mapped-triangle canvas { touch-action: none; }
+    .source-triangle { position: relative; }
+    .plot .drag-status {
+      position: absolute;
+      inset: auto 8px 8px;
+      padding: 4px 7px;
+      border-radius: 4px;
+      background: #141e2c;
+      font-size: 0.8rem;
+      pointer-events: none;
+    }
+    .plot .drag-status:empty { padding: 0; }
+    .drag-status { color: #ffdf8f; }
+
+    .matrix-column {
+      grid-area: matrix;
+      display: grid;
+      align-self: start;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .matrix-panel {
+      min-width: 0;
+      padding: 14px 9px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      text-align: center;
+    }
+
+    .matrix-panel h2 {
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: clamp(0.8rem, 1.1vw, 1.15rem);
+      font-weight: 600;
+    }
+
+    .matrix {
+      position: relative;
+      width: 100%;
+      border-spacing: 5px;
+      padding-inline: 5px;
+      font: clamp(0.9rem, 1.6vw, 1.7rem) var(--mono);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .matrix::before, .matrix::after {
+      position: absolute;
+      inset-block: 1px;
+      width: 5px;
+      border-block: 1px solid #637b93;
+      content: "";
+    }
+
+    .matrix::before { inset-inline-start: 0; border-inline-start: 1px solid #637b93; }
+    .matrix::after { inset-inline-end: 0; border-inline-end: 1px solid #637b93; }
+
+    .matrix td {
+      width: 50%;
+      padding: 0;
+    }
+
+    .matrix input {
+      display: block;
+      width: 100%;
+      min-width: 0;
+      padding: 7px 2px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: #0f1724;
+      color: var(--ink-blue);
+      font: inherit;
+      text-align: center;
+    }
+
+    .matrix input:focus { outline: 2px solid var(--ink-blue); outline-offset: 0; }
+    .matrix input[aria-invalid="true"] { border-color: #ff8991; }
+    .matrix-status { margin: 6px 0 0; color: #ffb3b8; font-size: 0.8rem; }
+
+    .matrix-analysis {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    .singular-values {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      margin: 0;
+      font: clamp(0.75rem, 1.12vw, 1.15rem) var(--mono);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .singular-values dt { font-weight: 650; }
+    .singular-values dd { margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .singular-values div:first-child { color: var(--major-axis); }
+    .singular-values div:last-child { color: var(--minor-axis); }
+
+    .matrix-properties {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 5px;
+      margin: 10px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .property-chip {
+      padding: 4px 7px;
+      border: 1px solid #39596b;
+      border-radius: 999px;
+      background: #182f3e;
+      color: #b1e5fa;
+      font-family: inherit;
+      font-size: clamp(0.72rem, 0.82vw, 0.94rem);
+      font-weight: 600;
+      line-height: 1.2;
+      white-space: nowrap;
+      cursor: help;
+    }
+
+    .property-chip--mesh { border-color: #3c6358; background: #1c3430; color: #a1efd6; }
+    .property-chip--singular { border-color: #8a535c; background: #41252c; color: #ffb8bd; }
+    .property-chip:hover, .property-chip[aria-expanded="true"] { border-color: currentColor; }
+    .property-chip:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
+    .property-tooltip {
+      --tooltip-accent: #b1e5fa;
+      --tooltip-border: #48617a;
+      --tooltip-background: #1c2b3c;
+      position: fixed;
+      z-index: 10;
+      width: min(300px, calc(100% - 20px));
+      padding: 12px 14px;
+      border: 1px solid var(--tooltip-border);
+      border-radius: 10px;
+      background: var(--tooltip-background);
+      box-shadow: 0 8px 24px #050914aa;
+      text-align: left;
+      font-size: 0.9rem;
+      line-height: 1.4;
+    }
+
+    .property-tooltip::before {
+      position: absolute;
+      left: var(--tooltip-arrow);
+      bottom: -5px;
+      width: 8px;
+      height: 8px;
+      border-right: 1px solid var(--tooltip-border);
+      border-bottom: 1px solid var(--tooltip-border);
+      background: var(--tooltip-background);
+      transform: translateX(-50%) rotate(45deg);
+      content: "";
+    }
+
+    .property-tooltip[data-side="below"]::before { top: -5px; bottom: auto; transform: translateX(-50%) rotate(225deg); }
+    .property-tooltip[data-side="right"]::before {
+      top: var(--tooltip-arrow);
+      right: auto;
+      bottom: auto;
+      left: -5px;
+      transform: translateY(-50%) rotate(135deg);
+    }
+    .property-tooltip[data-kind="mesh"] { --tooltip-accent: #a1efd6; }
+    .property-tooltip[data-kind="singular"] { --tooltip-accent: #ffb8bd; }
+    .tooltip-effect { margin: 0; color: var(--tooltip-accent); font-weight: 650; }
+    .tooltip-criterion { margin: 8px 0 0; padding-top: 7px; border-top: 1px solid var(--tooltip-border); color: #dbe6f1; }
+
+    .matrix-preset {
+      display: grid;
+      gap: 5px;
+      margin-top: 12px;
+      text-align: left;
+    }
+
+    .matrix-preset label {
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .matrix-preset select {
+      width: 100%;
+      min-width: 0;
+      padding: 6px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: #0f1724;
+      color: #edf3f8;
+      font-family: inherit;
+      font-size: clamp(0.73rem, 0.87vw, 0.94rem);
+      font-weight: 600;
+      line-height: 1.3;
+      cursor: pointer;
+    }
+
+    .matrix-preset select:focus-visible { outline: 2px solid var(--ink-blue); }
+
+    .matrix-help {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: clamp(0.75rem, 0.88vw, 0.95rem);
+      line-height: 1.4;
+    }
+
+    .matrix-help h2 { color: #edf3f8; font-size: inherit; }
+    .matrix-help ul { margin: 5px 0 0; padding-inline-start: 1.1em; }
+    .matrix-help li + li { margin-top: 4px; }
+
+    @media (max-width: 760px) {
+      main { height: auto; }
+
+      .comparison {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: auto;
+        grid-template-areas:
+          "matrix matrix"
+          "original transformed"
+          "circle ellipse"
+          "source mapped";
+        gap: 10px;
+      }
+
+      .matrix-panel {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 12px;
+      }
+
+      .matrix-panel h2 { margin: 0; }
+      .matrix { width: 138px; }
+      .matrix-status { grid-column: 1 / -1; margin: 0; }
+      .matrix-analysis { grid-column: 1 / -1; margin-top: 0; }
+      figcaption { padding-inline: 9px; }
+      canvas { height: clamp(150px, 43vw, 275px); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="page-header">
+      <h1>Visualizing 2D Linear Maps distortion</h1>
+      <p class="credit">Carlos Andujar - UPC</p>
+    </header>
+
+    <div class="comparison">
+      <div class="matrix-column">
+        <section class="matrix-panel" aria-labelledby="matrix-title">
+          <h2 id="matrix-title">Matrix A</h2>
+          <table class="matrix" aria-labelledby="matrix-title">
+            <tbody>
+              <tr>
+                <td><input value="1.45" spellcheck="false" aria-label="Row 1, column 1"></td>
+                <td><input value="0.65" spellcheck="false" aria-label="Row 1, column 2"></td>
+              </tr>
+              <tr>
+                <td><input value="0.35" spellcheck="false" aria-label="Row 2, column 1"></td>
+                <td><input value="0.80" spellcheck="false" aria-label="Row 2, column 2"></td>
+              </tr>
+            </tbody>
+          </table>
+          <p id="matrix-status" class="matrix-status" role="status" hidden></p>
+          <div class="matrix-analysis">
+            <dl class="singular-values" aria-label="Singular values">
+              <div><dt>σ₁</dt><dd id="sigma-major"></dd></div>
+              <div><dt>σ₂</dt><dd id="sigma-minor"></dd></div>
+            </dl>
+            <ul id="matrix-properties" class="matrix-properties" role="list" aria-label="Matrix properties"></ul>
+            <div class="matrix-preset">
+              <label for="matrix-preset">Preset</label>
+              <select id="matrix-preset">
+                <option value="" selected disabled>Custom</option>
+                <option value="identity">Identity</option>
+                <option value="uniform-scale">Uniform scale</option>
+                <option value="anisotropic-scale">Anisotropic scale</option>
+                <option value="rotation-45">Rotation 45°</option>
+                <option value="rotation-90">Rotation 90°</option>
+                <option value="flip-left-right">Flip left–right</option>
+                <option value="flip-top-bottom">Flip top–bottom</option>
+                <option value="singular">Singular</option>
+                <option value="arbitrary">Arbitrary</option>
+              </select>
+            </div>
+          </div>
+        </section>
+        <section class="matrix-help" aria-labelledby="matrix-help-title">
+          <h2 id="matrix-help-title">Usage</h2>
+          <ul>
+            <li>Edit the matrix directly.</li>
+            <li>Drag a movable vertex of either triangle.</li>
+          </ul>
+        </section>
+      </div>
+
+      <h2 class="panel-heading original-heading">Original</h2>
+      <h2 class="panel-heading transformed-heading">Transformed</h2>
+
+      <figure class="plot circle">
+        <figcaption>Unit circle</figcaption>
+        <canvas id="circle" role="img" aria-label="Unit circle with basis vectors X and Y"></canvas>
+      </figure>
+      <figure class="plot ellipse">
+        <figcaption id="image-caption">Ellipse</figcaption>
+        <canvas id="ellipse" role="img" aria-labelledby="image-caption"></canvas>
+      </figure>
+      <figure class="plot source-triangle">
+        <figcaption>Triangle</figcaption>
+        <canvas id="source-triangle" role="img" aria-label="Original triangle with v0 fixed at the origin and movable vertices v1 and v2" aria-describedby="source-drag-status"></canvas>
+        <span id="source-drag-status" class="drag-status" role="status"></span>
+      </figure>
+      <figure class="plot mapped-triangle">
+        <figcaption>Triangle</figcaption>
+        <canvas id="mapped-triangle" role="img" aria-label="Transformed triangle with v0 prime fixed at the origin and movable vertices v1 prime and v2 prime"></canvas>
+      </figure>
+    </div>
+  </main>
+
+  <div class="property-tooltip" id="property-tooltip" aria-hidden="true" hidden>
+    <p class="tooltip-effect"></p>
+    <p class="tooltip-criterion"></p>
+  </div>
+
+  <script>
+    const matrixInputs = [...document.querySelectorAll('.matrix input')];
+    const matrixStatus = document.getElementById('matrix-status');
+    const imageCaption = document.getElementById('image-caption');
+    const singularValueElements = [document.getElementById('sigma-major'), document.getElementById('sigma-minor')];
+    const matrixProperties = document.getElementById('matrix-properties');
+    const propertyTooltip = document.getElementById('property-tooltip');
+    const tooltipEffect = propertyTooltip.querySelector('.tooltip-effect');
+    const tooltipCriterion = propertyTooltip.querySelector('.tooltip-criterion');
+    let tooltipChip = null;
+    let tooltipPinned = false;
+    let tooltipCloseTimer;
+    const presetSelect = document.getElementById('matrix-preset');
+    const diagonal45 = Math.SQRT1_2;
+    const matrixPresets = new Map([
+      ['identity', [[1, 0], [0, 1]]],
+      ['uniform-scale', [[1.5, 0], [0, 1.5]]],
+      ['anisotropic-scale', [[2, 0], [0, 0.5]]],
+      ['rotation-45', [[diagonal45, -diagonal45], [diagonal45, diagonal45]]],
+      ['rotation-90', [[0, -1], [1, 0]]],
+      ['flip-left-right', [[-1, 0], [0, 1]]],
+      ['flip-top-bottom', [[1, 0], [0, -1]]],
+      ['singular', [[1, 0], [0, 0]]],
+      ['arbitrary', [[1, 0.5], [-1, -2]]],
+    ]);
+    const triangleOrigin = [0, 0];
+    const state = {
+      matrix: [],
+      preset: '',
+      triangles: [
+        [triangleOrigin, [1, 0], [0, 1]],
+        [triangleOrigin, [1, 0], [0, 1]],
+      ],
+    };
+    const syncedInputValues = matrixInputs.map((input) => input.value);
+    const vertexColors = [[161, 148, 255], [255, 158, 100], [75, 220, 188]];
+    const triangleLayer = document.createElement('canvas');
+
+    function mapPoint([[a, b], [c, d]], [x, y]) {
+      return [a * x + b * y, c * x + d * y];
+    }
+
+    function binaryScale(magnitude) {
+      return 2 ** Math.min(1023, Math.floor(Math.log2(magnitude)));
+    }
+
+    function productRoundingError(x, y, product) {
+      const splitter = 134217729; // 2^27 + 1 for binary64 significands.
+      const xPart = x * splitter;
+      const yPart = y * splitter;
+      const xHigh = xPart - (xPart - x);
+      const yHigh = yPart - (yPart - y);
+      const xLow = x - xHigh;
+      const yLow = y - yHigh;
+      return ((xHigh * yHigh - product) + xHigh * yLow + xLow * yHigh) + xLow * yLow;
+    }
+
+    function determinant2x2(a, b, c, d) {
+      // The caller scales the entries before multiplying. Recover bits lost to cancellation.
+      const ad = a * d;
+      const bc = b * c;
+      return (ad - bc) + (productRoundingError(a, d, ad) - productRoundingError(b, c, bc));
+    }
+
+    function factorMatrixRows(matrix) {
+      // Scale each row independently so small rows do not underflow the determinant.
+      const scales = matrix.map((row) => binaryScale(Math.max(...row.map(Math.abs))));
+      const rows = matrix.map((row, index) => row.map((value) => value / (scales[index] || 1)));
+      const [[a, b], [c, d]] = rows;
+      return { rows, scales, determinant: determinant2x2(a, b, c, d) };
+    }
+
+    function getInverseSolver(matrix) {
+      const { rows: [[a, b], [c, d]], scales, determinant } = factorMatrixRows(matrix);
+      if (!Number.isFinite(determinant) || determinant === 0) return null;
+
+      return (delta, displayScale) => {
+        const [x, y] = delta.map((value, index) => {
+          const ratio = displayScale / scales[index];
+          return Number.isFinite(ratio) && ratio > 0
+            ? value * ratio
+            : (value * displayScale) / scales[index];
+        });
+        return [(d * x - b * y) / determinant, (a * y - c * x) / determinant];
+      };
+    }
+
+    function getTriangleMap([, source1, source2], [, target1, target2]) {
+      // With v0 at the origin, each movable vertex is an input vector.
+      const solve = getInverseSolver([source1, source2]);
+      if (!solve) return null;
+
+      const [[x1, y1], [x2, y2]] = [target1, target2];
+      return [solve([x1, x2], 1), solve([y1, y2], 1)];
+    }
+
+    function drawLine(context, from, to, color, width = 1) {
+      context.beginPath();
+      context.moveTo(...from);
+      context.lineTo(...to);
+      context.strokeStyle = color;
+      context.lineWidth = width;
+      context.stroke();
+    }
+
+    function drawLabels(context, labels, size) {
+      const transform = context.getTransform();
+      const width = context.canvas.width / transform.a;
+      const height = context.canvas.height / transform.d;
+      const placed = [];
+      context.font = `700 ${size}px "Cascadia Code", Consolas, monospace`;
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.lineJoin = 'round';
+      context.strokeStyle = '#111a27';
+      context.lineWidth = size >= 18 ? 5 : 3;
+
+      for (const { text, tip, color, direction } of labels) {
+        const halfWidth = context.measureText(text).width / 2 + 3;
+        const halfHeight = size * 0.65;
+        const directions = [direction, [1, -1], [-1, -1], [1, 1], [-1, 1], [0, -1], [0, 1]];
+        const candidates = [1, 2, 3].flatMap((distance) => directions.map(([dx, dy]) => [
+          Math.max(halfWidth, Math.min(width - halfWidth, tip[0] + dx * (halfWidth + size * 0.35 * distance))),
+          Math.max(halfHeight, Math.min(height - halfHeight, tip[1] + dy * (halfHeight + size * 0.22 * distance))),
+        ]));
+        const [x, y] = candidates.find(([x, y]) => placed.every((label) =>
+          Math.abs(label.x - x) >= label.halfWidth + halfWidth ||
+          Math.abs(label.y - y) >= 2 * halfHeight)) ?? candidates[0];
+
+        placed.push({ x, y, halfWidth });
+        context.strokeText(text, x, y);
+        context.fillStyle = color;
+        context.fillText(text, x, y);
+      }
+    }
+
+    function drawArrow(context, origin, tip, color, headSize, width, dash = []) {
+      const length = Math.hypot(tip[0] - origin[0], tip[1] - origin[1]);
+      if (length < 0.75) return;
+
+      headSize = Math.min(headSize, length * 0.6);
+      const angle = Math.atan2(tip[1] - origin[1], tip[0] - origin[0]);
+      context.setLineDash(dash);
+      drawLine(context, origin, tip, color, width);
+      context.setLineDash([]);
+      context.beginPath();
+      context.moveTo(...tip);
+      for (const offset of [-0.48, 0.48]) {
+        context.lineTo(tip[0] - headSize * Math.cos(angle + offset), tip[1] - headSize * Math.sin(angle + offset));
+      }
+      context.closePath();
+      context.fillStyle = color;
+      context.fill();
+    }
+
+    function drawGrid(context, width, height, origin, spacing) {
+      // Double the grid interval when zooming out to keep the lines distinct.
+      if (spacing === 0) spacing = 22;
+      while (spacing < 22) spacing *= 2;
+      for (let x = (origin[0] % spacing + spacing) % spacing; x < width; x += spacing) {
+        drawLine(context, [x, 0], [x, height], '#2a3b50');
+      }
+      for (let y = (origin[1] % spacing + spacing) % spacing; y < height; y += spacing) {
+        drawLine(context, [0, y], [width, y], '#2a3b50');
+      }
+      drawLine(context, [0, origin[1]], [width, origin[1]], '#5b708a', 1.3);
+      drawLine(context, [origin[0], 0], [origin[0], height], '#5b708a', 1.3);
+    }
+
+    function getSemiaxes([[a, b], [c, d]]) {
+      const magnitude = Math.max(Math.abs(a), Math.abs(b), Math.abs(c), Math.abs(d));
+      if (magnitude === 0) return [[0, 0], [0, 0]];
+
+      // A power-of-two scale avoids squaring very large or small coefficients.
+      const scale = binaryScale(magnitude);
+      [a, b, c, d] = [a, b, c, d].map((value) => value / scale);
+      // Eigenvectors of A A^T give the output directions, with eigenvalues σ².
+      const xx = a * a + b * b;
+      const xy = a * c + b * d;
+      const yy = c * c + d * d;
+      const angle = Math.atan2(2 * xy, xx - yy) / 2;
+      const majorLength = Math.sqrt((xx + yy + Math.hypot(xx - yy, 2 * xy)) / 2);
+      const minorLength = Math.abs(determinant2x2(a, b, c, d)) / majorLength;
+      const cosine = Math.cos(angle);
+      const sine = Math.sin(angle);
+      return [
+        [-majorLength * cosine * scale, -majorLength * sine * scale],
+        [-minorLength * sine * scale, minorLength * cosine * scale],
+      ];
+    }
+
+    function positionPropertyTooltip() {
+      if (!tooltipChip) return;
+
+      const anchor = tooltipChip.getBoundingClientRect();
+      const viewportWidth = document.documentElement.clientWidth;
+      const viewportHeight = window.innerHeight;
+      if (anchor.bottom < 0 || anchor.top > viewportHeight) {
+        hidePropertyTooltip();
+        return;
+      }
+
+      const { width, height } = propertyTooltip.getBoundingClientRect();
+      const rowRight = matrixProperties.getBoundingClientRect().right;
+      const beside = rowRight + width + 18 <= viewportWidth && viewportWidth > 760;
+      if (beside) {
+        const center = (anchor.top + anchor.bottom) / 2;
+        const top = Math.max(8, Math.min(center - height / 2, viewportHeight - height - 8));
+        propertyTooltip.dataset.side = 'right';
+        propertyTooltip.style.left = `${rowRight + 8}px`;
+        propertyTooltip.style.top = `${top}px`;
+        propertyTooltip.style.setProperty('--tooltip-arrow', `${center - top}px`);
+        return;
+      }
+
+      const center = (anchor.left + anchor.right) / 2;
+      const left = Math.max(10, Math.min(center - width / 2, viewportWidth - width - 10));
+      const above = anchor.top - height - 8;
+      const below = anchor.bottom + 8;
+      const placeBelow = above < 8 && viewportHeight - anchor.bottom > anchor.top;
+      const top = Math.max(8, Math.min(placeBelow ? below : above, viewportHeight - height - 8));
+      propertyTooltip.dataset.side = placeBelow ? 'below' : 'above';
+      propertyTooltip.style.left = `${left}px`;
+      propertyTooltip.style.top = `${top}px`;
+      propertyTooltip.style.setProperty('--tooltip-arrow', `${Math.max(12, Math.min(center - left, width - 12))}px`);
+    }
+
+    function hidePropertyTooltip() {
+      clearTimeout(tooltipCloseTimer);
+      if (tooltipChip) tooltipChip.setAttribute('aria-expanded', 'false');
+      tooltipChip = null;
+      tooltipPinned = false;
+      propertyTooltip.hidden = true;
+    }
+
+    function showPropertyTooltip(chip, kind, effect, criterion, pinned = false) {
+      hidePropertyTooltip();
+      tooltipChip = chip;
+      tooltipPinned = pinned;
+      chip.setAttribute('aria-expanded', 'true');
+      tooltipEffect.textContent = effect;
+      tooltipCriterion.textContent = criterion;
+      propertyTooltip.dataset.kind = kind;
+      propertyTooltip.hidden = false;
+      positionPropertyTooltip();
+    }
+
+    function schedulePropertyTooltipClose() {
+      clearTimeout(tooltipCloseTimer);
+      if (tooltipChip && !tooltipPinned && !tooltipChip.matches(':focus-visible')) {
+        tooltipCloseTimer = setTimeout(hidePropertyTooltip, 180);
+      }
+    }
+
+    function createPropertyChip(label, kind, effect, criterion, index) {
+      const item = document.createElement('li');
+      const chip = document.createElement('button');
+      const description = document.createElement('span');
+      description.id = `property-description-${index}`;
+      description.hidden = true;
+      description.textContent = `${effect} ${criterion}`;
+      chip.type = 'button';
+      chip.className = `property-chip property-chip--${kind}`;
+      chip.textContent = label;
+      chip.setAttribute('aria-describedby', description.id);
+      chip.setAttribute('aria-expanded', 'false');
+
+      const show = (pinned = false) => showPropertyTooltip(chip, kind, effect, criterion, pinned);
+      chip.addEventListener('pointerenter', (event) => {
+        if (event.pointerType === 'touch') return;
+        if (tooltipChip === chip) clearTimeout(tooltipCloseTimer);
+        else if (!tooltipPinned) show();
+      });
+      chip.addEventListener('pointerleave', () => {
+        if (tooltipChip === chip) schedulePropertyTooltipClose();
+      });
+      chip.addEventListener('focus', () => {
+        if (chip.matches(':focus-visible')) show();
+      });
+      chip.addEventListener('blur', () => {
+        if (tooltipChip === chip) hidePropertyTooltip();
+      });
+      chip.addEventListener('click', (event) => {
+        if (tooltipChip === chip && (tooltipPinned || event.detail === 0)) hidePropertyTooltip();
+        else show(true);
+      });
+      item.append(chip, description);
+      return item;
+    }
+
+    propertyTooltip.addEventListener('pointerenter', () => clearTimeout(tooltipCloseTimer));
+    propertyTooltip.addEventListener('pointerleave', schedulePropertyTooltipClose);
+    document.addEventListener('pointerdown', (event) => {
+      if (tooltipChip && !tooltipChip.contains(event.target) && !propertyTooltip.contains(event.target)) {
+        hidePropertyTooltip();
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && tooltipChip) hidePropertyTooltip();
+    });
+    window.addEventListener('scroll', positionPropertyTooltip, { passive: true });
+    window.addEventListener('resize', positionPropertyTooltip);
+
+    function showMatrixProperties(matrix, scale, major, minor) {
+      const { scales, determinant } = factorMatrixRows(state.matrix);
+      const singular = determinant === 0;
+      const sigma1 = major * scale;
+      const sigma2 = singular ? 0 : (
+        Math.abs(determinant) * ((Math.max(...scales) / scale) / major) * Math.min(...scales)
+      );
+      [sigma1, sigma2].forEach((value, index) => {
+        let label = '∞';
+        if (Number.isFinite(value)) {
+          label = value !== 0 && (value < 0.001 || value >= 10000)
+            ? value.toExponential(2)
+            : String(Number(value.toPrecision(5)));
+        }
+        const element = singularValueElements[index];
+        if (element.textContent !== label) element.textContent = label;
+        element.title = String(value);
+      });
+
+      const tolerance = 1e-6;
+      const isotropic = !singular && Math.abs(major - minor) <= tolerance * major;
+      const isometric = isotropic && [sigma1, sigma2].every((value) => Math.abs(value - 1) <= tolerance);
+      const logArea = Math.log(Math.abs(determinant)) + Math.log(scales[0]) + Math.log(scales[1]);
+      const areaPreserving = !singular && Math.abs(Math.expm1(logArea)) <= tolerance;
+      const [[a, b], [c, d]] = matrix;
+      // This is the angle of the orthogonal polar factor for orientation-preserving maps.
+      const rotation = determinant > 0 && Math.abs(Math.atan2(c - b, a + d)) > tolerance;
+      const properties = [
+        ['Singular', 'singular', singular,
+          'Flattens the unit circle to a line segment or a point.',
+          'The smaller singular value is zero.'],
+        ['Includes rotation', 'geometry', rotation,
+          'Turns the shape as part of the transformation.',
+          'The determinant is positive and the polar rotation angle exceeds 10⁻⁶ radians in magnitude.'],
+        ['Uniform scale', 'geometry', isotropic && !isometric,
+          'Stretches or shrinks every direction by the same factor.',
+          'The singular values are positive and approximately equal. At least one differs from 1 beyond the tolerance.'],
+        ['Anisotropic scale', 'geometry', !singular && !isotropic,
+          'Stretches some directions more than others.',
+          'The map is invertible and the two singular values differ beyond the tolerance.'],
+        ['Flip', 'geometry', determinant < 0,
+          'Reverses orientation.',
+          'The determinant is negative.'],
+        ['Isometric', 'mesh', isometric,
+          'Preserves lengths.',
+          'The singular values are approximately equal and both are close to 1.'],
+        ['Angle-preserving', 'mesh', isotropic,
+          'Preserves the size of angles between vectors, even under reflection.',
+          'The two singular values are positive and approximately equal.'],
+        ['Area-preserving', 'mesh', areaPreserving,
+          'Preserves area.',
+          'The product of the two singular values is approximately 1.'],
+      ].filter(([, , visible]) => visible);
+
+      const signature = properties.map(([label]) => label).join('|');
+      if (matrixProperties.dataset.signature !== signature) {
+        hidePropertyTooltip();
+        matrixProperties.replaceChildren(...properties.map(([label, kind, , effect, criterion], index) =>
+          createPropertyChip(label, kind, effect, criterion, index)));
+        matrixProperties.dataset.signature = signature;
+      }
+
+      return { singular, isotropic };
+    }
+
+    function drawVectors(context, origin, project, matrix, semiaxes, suffix, labelSize) {
+      const sample = (angle) => project(mapPoint(matrix, [Math.cos(angle), Math.sin(angle)]));
+      const [majorTip, minorTip] = semiaxes.map(project);
+      const majorRadius = Math.hypot(majorTip[0] - origin[0], majorTip[1] - origin[1]);
+      const minorRadius = Math.hypot(minorTip[0] - origin[0], minorTip[1] - origin[1]);
+      const angle = Math.atan2(majorTip[1] - origin[1], majorTip[0] - origin[0]);
+
+      context.beginPath();
+      if (majorRadius === 0) {
+        context.arc(...origin, labelSize * 0.24, 0, 2 * Math.PI);
+        context.fillStyle = '#8edbfa';
+      } else if (minorRadius === 0) {
+        context.moveTo(...majorTip);
+        context.lineTo(2 * origin[0] - majorTip[0], 2 * origin[1] - majorTip[1]);
+      } else {
+        context.ellipse(...origin, majorRadius, minorRadius, angle, 0, 2 * Math.PI);
+        context.fillStyle = '#72d5fa15';
+      }
+      context.fill();
+      context.strokeStyle = '#8edbfa';
+      context.lineWidth = labelSize * 0.14;
+      context.stroke();
+
+      for (let step = 1; step < 12; step++) {
+        if (step !== 3) {
+          drawArrow(context, origin, sample(step * Math.PI / 6), '#7795ad', labelSize * 0.36, 1.2);
+        }
+      }
+
+      const xTip = project(mapPoint(matrix, [1, 0]));
+      const yTip = project(mapPoint(matrix, [0, 1]));
+      const basisWidth = labelSize * 0.18;
+      const headSize = labelSize * 0.65;
+      const labels = [
+        { text: `X${suffix}`, tip: xTip, color: '#ff757e', direction: [1, 1] },
+        { text: `Y${suffix}`, tip: yTip, color: '#75eca0', direction: [1, -1] },
+      ];
+
+      if (suffix) {
+        // Either end is valid. Prefer the end farther from the mapped basis tips.
+        const opposite = (tip) => [2 * origin[0] - tip[0], 2 * origin[1] - tip[1]];
+        const clearance = (tip) => Math.min(...[xTip, yTip].map(([x, y]) => Math.hypot(x - tip[0], y - tip[1])));
+        [majorTip, minorTip].forEach((tip, index) => {
+          const otherTip = opposite(tip);
+          const end = clearance(otherTip) > clearance(tip) + 1 ? otherTip : tip;
+          const color = index === 0 ? '#f5f8ff' : '#ffdf8f';
+          drawArrow(context, origin, end, color, headSize, basisWidth * 0.85, index === 0 ? [] : [6, 4]);
+          labels.push({ text: index === 0 ? 'σ₁' : 'σ₂', tip: end, color,
+            direction: [end[0] <= origin[0] ? -1 : 1, index === 0 ? 1 : -1] });
+        });
+      }
+
+      drawArrow(context, origin, xTip, '#ff757e', headSize, basisWidth);
+      drawArrow(context, origin, yTip, '#75eca0', headSize, basisWidth);
+      drawLabels(context, labels, labelSize);
+    }
+
+    function fillTriangle(context, vertices) {
+      const { a: scaleX, d: scaleY } = context.getTransform();
+      const pixels = vertices.map(([x, y]) => [x * scaleX, y * scaleY]);
+      const xs = pixels.map(([x]) => x);
+      const ys = pixels.map(([, y]) => y);
+      const left = Math.max(0, Math.floor(Math.min(...xs)));
+      const top = Math.max(0, Math.floor(Math.min(...ys)));
+      const width = Math.min(context.canvas.width, Math.ceil(Math.max(...xs))) - left;
+      const height = Math.min(context.canvas.height, Math.ceil(Math.max(...ys))) - top;
+      const [[x0, y0], [x1, y1], [x2, y2]] = pixels;
+      const denominator = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2);
+      if (width <= 0 || height <= 0 || !Number.isFinite(denominator) || denominator === 0) return;
+
+      triangleLayer.width = width;
+      triangleLayer.height = height;
+      const layerContext = triangleLayer.getContext('2d');
+      const image = layerContext.createImageData(width, height);
+      const [color0, color1, color2] = vertexColors;
+
+      // Use the barycentric weights at each device pixel center to mix vertex colors.
+      for (let row = 0; row < height; row++) {
+        const y = top + row + 0.5 - y2;
+        for (let column = 0; column < width; column++) {
+          const x = left + column + 0.5 - x2;
+          const w0 = ((y1 - y2) * x + (x2 - x1) * y) / denominator;
+          const w1 = ((y2 - y0) * x + (x0 - x2) * y) / denominator;
+          const w2 = 1 - w0 - w1;
+          if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+
+          const offset = 4 * (row * width + column);
+          for (let channel = 0; channel < 3; channel++) {
+            image.data[offset + channel] = w0 * color0[channel] + w1 * color1[channel] + w2 * color2[channel];
+          }
+          image.data[offset + 3] = 255;
+        }
+      }
+
+      layerContext.putImageData(image, 0, 0);
+      context.drawImage(triangleLayer, left / scaleX, top / scaleY, width / scaleX, height / scaleY);
+    }
+
+    function drawTriangle(context, vertices, suffix, labelSize, activeVertex) {
+      fillTriangle(context, vertices);
+
+      context.beginPath();
+      context.moveTo(...vertices[0]);
+      context.lineTo(...vertices[1]);
+      context.lineTo(...vertices[2]);
+      context.closePath();
+      context.strokeStyle = '#e6effc';
+      context.lineWidth = labelSize * 0.09;
+      context.stroke();
+
+      const directions = [[-1, 1], [1, 1], [1, -1]];
+      const labels = vertices.map(([x, y], index) => {
+        const color = `rgb(${vertexColors[index].join(', ')})`;
+        if (index === activeVertex) {
+          context.beginPath();
+          context.arc(x, y, labelSize * 0.55, 0, 2 * Math.PI);
+          context.strokeStyle = '#edf3f8';
+          context.lineWidth = 2;
+          context.stroke();
+        }
+        context.beginPath();
+        const radius = labelSize * 0.34;
+        if (index === 0) context.rect(x - radius, y - radius, 2 * radius, 2 * radius);
+        else context.arc(x, y, radius, 0, 2 * Math.PI);
+        context.fillStyle = color;
+        context.fill();
+        context.strokeStyle = '#111a27';
+        context.lineWidth = 2;
+        context.stroke();
+        return { text: `v${index}${suffix}`, tip: [x, y], color, direction: directions[index] };
+      });
+      drawLabels(context, labels, labelSize);
+    }
+
+    const vectorCanvases = [document.getElementById('circle'), document.getElementById('ellipse')];
+    const triangleCanvases = [document.getElementById('source-triangle'), document.getElementById('mapped-triangle')];
+    const sourceDragStatus = document.getElementById('source-drag-status');
+    const triangleHandles = [null, null];
+    let drag = null;
+    let settledTriangleFrame = null;
+
+    function renderPair(canvases, lower, upper, gridUnit, draw, fixedView) {
+      const bounds = canvases.map((canvas) => canvas.getBoundingClientRect());
+      const minWidth = Math.min(...bounds.map(({ width }) => width));
+      const minHeight = Math.min(...bounds.map(({ height }) => height));
+      const labelSize = fixedView?.labelSize ?? Math.max(11, Math.min(24, Math.min(minWidth, minHeight) * 0.055));
+      const padding = labelSize * 2.55;
+      const unit = fixedView?.unit ?? Math.min(
+        (minWidth - 2 * padding) / Math.max(upper[0] - lower[0], gridUnit),
+        (minHeight - 2 * padding) / Math.max(upper[1] - lower[1], gridUnit),
+      );
+      if (unit <= 0 || !Number.isFinite(unit)) return;
+
+      const centerX = fixedView?.centerX ?? (lower[0] + upper[0]) / 2;
+      const centerY = fixedView?.centerY ?? (lower[1] + upper[1]) / 2;
+      const view = { unit, centerX, centerY, labelSize };
+      const pixelRatio = window.devicePixelRatio || 1;
+
+      canvases.forEach((canvas, index) => {
+        const { width, height } = bounds[index];
+        canvas.width = Math.round(width * pixelRatio);
+        canvas.height = Math.round(height * pixelRatio);
+        const context = canvas.getContext('2d');
+        context.setTransform(canvas.width / width, 0, 0, canvas.height / height, 0, 0);
+        const origin = [width / 2 - centerX * unit, height / 2 + centerY * unit];
+        const project = ([x, y]) => [origin[0] + x * unit, origin[1] - y * unit];
+        drawGrid(context, width, height, origin, unit * gridUnit);
+        draw(context, origin, project, index, view);
+      });
+    }
+
+    function renderPlots() {
+      // Normalize both panels by the same power of two before fitting them.
+      const magnitude = Math.max(1, ...state.matrix.flat().map(Math.abs));
+      const scale = binaryScale(magnitude);
+      const gridUnit = 1 / scale;
+      const sourceMatrix = [[gridUnit, 0], [0, gridUnit]];
+      const targetMatrix = state.matrix.map((row) => row.map((entry) => entry / scale));
+      const matrices = [sourceMatrix, targetMatrix];
+      const semiaxes = matrices.map(getSemiaxes);
+      const [major, minor] = semiaxes[1].map((axis) => Math.hypot(...axis));
+      const { singular, isotropic } = showMatrixProperties(targetMatrix, scale, major, minor);
+      let imageName = 'Ellipse';
+      if (major === 0) imageName = 'Point';
+      else if (singular) imageName = 'Segment';
+      else if (isotropic && (major - minor) / major <= 8 * Number.EPSILON) imageName = 'Circle';
+      if (imageCaption.textContent !== imageName) imageCaption.textContent = imageName;
+
+      const extents = targetMatrix.map((row) => Math.max(gridUnit, Math.hypot(...row)));
+      renderPair(vectorCanvases, extents.map((extent) => -extent), extents, gridUnit,
+        (context, origin, project, index, view) => {
+          drawVectors(context, origin, project, matrices[index], semiaxes[index], index === 0 ? '' : '′', view.labelSize);
+        });
+
+      const frame = drag?.frame ?? settledTriangleFrame;
+      const triangleScale = frame?.scale ?? binaryScale(Math.max(1, ...state.triangles.flat(2).map(Math.abs)));
+      const triangles = state.triangles.map((triangle) => triangle.map((point) =>
+        point.map((value) => value / triangleScale)));
+      const xs = triangles.flat().map(([x]) => x);
+      const ys = triangles.flat().map(([, y]) => y);
+      renderPair(triangleCanvases, [Math.min(0, ...xs), Math.min(0, ...ys)],
+        [Math.max(0, ...xs), Math.max(0, ...ys)], 0.5 / triangleScale,
+        (context, origin, project, index, view) => {
+          const points = triangles[index].map(project);
+          triangleHandles[index] = { points, frame: { view, scale: triangleScale } };
+          drawTriangle(context, points, index === 0 ? '' : '′', view.labelSize,
+            drag?.index === index ? drag.vertex : undefined);
+        }, frame?.view);
+    }
+
+    function nearestVertex(event, canvas, index) {
+      const handles = triangleHandles[index];
+      if (!handles) return -1;
+
+      const bounds = canvas.getBoundingClientRect();
+      const x = event.clientX - bounds.left;
+      const y = event.clientY - bounds.top;
+      let nearest = -1;
+      let distance = event.pointerType === 'touch' ? 24 : Math.max(11, handles.frame.view.labelSize * 0.6);
+      for (let vertex = 1; vertex < handles.points.length; vertex++) {
+        const [px, py] = handles.points[vertex];
+        const candidate = Math.hypot(x - px, y - py);
+        if (candidate < distance) {
+          distance = candidate;
+          nearest = vertex;
+        }
+      }
+      return nearest;
+    }
+
+    function moveVertex(event) {
+      const { canvas, frame, index, vertex, startPoint, initialVertex } = drag;
+      const { width, height } = canvas.getBoundingClientRect();
+      const margin = frame.view.labelSize * 0.6;
+      const x = Math.max(margin, Math.min(width - margin, startPoint[0] + event.clientX - drag.startX));
+      const y = Math.max(margin, Math.min(height - margin, startPoint[1] + event.clientY - drag.startY));
+      const next = [
+        initialVertex[0] + ((x - startPoint[0]) / frame.view.unit) * frame.scale,
+        initialVertex[1] - ((y - startPoint[1]) / frame.view.unit) * frame.scale,
+      ];
+      if (!next.every(Number.isFinite)) return;
+      if (next.every((value, axis) => value === state.triangles[index][vertex][axis])) {
+        if (index === 0) sourceDragStatus.textContent = '';
+        return;
+      }
+
+      const triangles = [...state.triangles];
+      triangles[index] = triangles[index].map((point, vertexIndex) => vertexIndex === vertex ? next : point);
+      const matrix = getTriangleMap(...triangles);
+      if (index === 0) sourceDragStatus.textContent = matrix ? '' : 'Original triangle must have area.';
+      if (!matrix?.flat().every(Number.isFinite)) return;
+
+      state.triangles = triangles;
+      state.matrix = matrix;
+      setSelectedPreset('');
+      syncMatrixInputs();
+      scheduleRender();
+    }
+
+    function endDrag() {
+      if (!drag) return;
+
+      const { canvas, pointerId, frame } = drag;
+      settledTriangleFrame = frame;
+      drag = null;
+      canvas.style.cursor = '';
+      if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
+      scheduleRender();
+    }
+
+    triangleCanvases.forEach((canvas, index) => {
+      canvas.addEventListener('pointerdown', (event) => {
+        if (drag || event.button !== 0 || !event.isPrimary) return;
+
+        const vertex = nearestVertex(event, canvas, index);
+        if (vertex < 0) return;
+
+        const { frame, points } = triangleHandles[index];
+        canvas.setPointerCapture(event.pointerId);
+        sourceDragStatus.textContent = '';
+        drag = { canvas, index, vertex, frame, pointerId: event.pointerId,
+          startX: event.clientX, startY: event.clientY, startPoint: points[vertex],
+          initialVertex: state.triangles[index][vertex] };
+        canvas.style.cursor = 'grabbing';
+        scheduleRender();
+      });
+
+      canvas.addEventListener('pointermove', (event) => {
+        if (drag?.pointerId === event.pointerId && drag.canvas === canvas) {
+          moveVertex(event);
+        } else if (!drag) {
+          canvas.style.cursor = nearestVertex(event, canvas, index) >= 0 ? 'grab' : '';
+        }
+      });
+
+      canvas.addEventListener('pointerleave', () => {
+        if (drag?.canvas !== canvas) canvas.style.cursor = '';
+      });
+
+      canvas.addEventListener('pointerup', (event) => {
+        if (drag?.pointerId !== event.pointerId || drag.canvas !== canvas) return;
+
+        moveVertex(event);
+        endDrag();
+      });
+
+      for (const type of ['pointercancel', 'lostpointercapture']) {
+        canvas.addEventListener(type, (event) => {
+          if (drag?.pointerId === event.pointerId && drag.canvas === canvas) endDrag();
+        });
+      }
+    });
+
+    let renderFrame = 0;
+    function scheduleRender() {
+      if (renderFrame) return;
+      renderFrame = requestAnimationFrame(() => {
+        renderFrame = 0;
+        renderPlots();
+      });
+    }
+
+    function showMatrixMessage(message) {
+      matrixStatus.textContent = message;
+      matrixStatus.hidden = message === '';
+    }
+
+    function setSelectedPreset(preset) {
+      state.preset = preset;
+      presetSelect.value = preset;
+    }
+
+    function syncMatrixInputs() {
+      state.matrix.flat().forEach((entry, index) => {
+        // Keep the full-precision coefficient for any displayed field the user leaves alone.
+        const value = String(Number(entry.toPrecision(7)));
+        matrixInputs[index].value = value;
+        syncedInputValues[index] = value;
+        matrixInputs[index].removeAttribute('aria-invalid');
+      });
+      showMatrixMessage('');
+    }
+
+    function updateMatrix() {
+      setSelectedPreset('');
+      const numberPattern = /^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:e[+-]?\d+)?$/i;
+      const entries = matrixInputs.map((input, index) => {
+        const value = input.value.trim();
+        const current = state.matrix[Math.floor(index / 2)]?.[index % 2];
+        if (value === syncedInputValues[index] && current !== undefined) return current;
+
+        return numberPattern.test(value) ? Number(value.replace(',', '.')) : NaN;
+      });
+      entries.forEach((entry, index) => {
+        matrixInputs[index].setAttribute('aria-invalid', String(!Number.isFinite(entry)));
+      });
+      if (!entries.every(Number.isFinite)) {
+        showMatrixMessage('Enter four numbers.');
+        return;
+      }
+
+      if (applyMatrix([entries.slice(0, 2), entries.slice(2)])) {
+        matrixInputs.forEach((input, index) => { syncedInputValues[index] = input.value.trim(); });
+      }
+    }
+
+    function applyMatrix(matrix) {
+      const [, source1, source2] = state.triangles[0];
+      const target = [triangleOrigin, mapPoint(matrix, source1), mapPoint(matrix, source2)];
+      if (!target.flat().every(Number.isFinite)) {
+        showMatrixMessage('Transformed coordinates are out of range.');
+        return false;
+      }
+
+      endDrag();
+      settledTriangleFrame = null;
+      triangleHandles.fill(null);
+      state.matrix = matrix;
+      state.triangles[1] = target;
+      sourceDragStatus.textContent = '';
+      showMatrixMessage('');
+      scheduleRender();
+      return true;
+    }
+
+    matrixInputs.forEach((input) => input.addEventListener('input', updateMatrix));
+    presetSelect.addEventListener('change', () => {
+      const preset = presetSelect.value;
+      const matrix = matrixPresets.get(preset);
+      if (!matrix || !applyMatrix(matrix)) {
+        presetSelect.value = state.preset;
+        return;
+      }
+
+      setSelectedPreset(preset);
+      syncMatrixInputs();
+    });
+    updateMatrix();
+
+    const resizeObserver = new ResizeObserver(scheduleRender);
+    [...vectorCanvases, ...triangleCanvases].forEach((canvas) => resizeObserver.observe(canvas));
+    window.addEventListener('resize', () => {
+      endDrag();
+      settledTriangleFrame = null;
+      scheduleRender();
+    });
+  </script>
+</body>
+</html>
